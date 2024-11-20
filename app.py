@@ -1,10 +1,12 @@
 from flask import Flask, render_template, request, redirect
 from flask_sqlalchemy import SQLAlchemy
+import pandas as pd
+import os  # para criar a pasta static
 
 # Inicializando o aplicativo Flask
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///veiculos.db'  # Banco de dados SQLite
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  # Desabilitar modificações
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  # Desabilitar notificações de modificação
 db = SQLAlchemy(app)
 
 # Modelo de dados (Tabela de Veículo)
@@ -17,16 +19,21 @@ class Veiculo(db.Model):
     cor = db.Column(db.String(50), nullable=False)
     observacao = db.Column(db.Text, nullable=True)
 
-# Rota para a página inicial (home)
+# Rota para a página inicial
 @app.route('/')
 def home():
-    return redirect('/cadastro')  # Redireciona para a página de cadastro de veículos
+    return redirect('/listar')  # Redireciona para a listagem de veículos
+
+# Rota para listagem de veículos
+@app.route('/listar')
+def listar():
+    veiculos = Veiculo.query.all()
+    return render_template('listar.html', veiculos=veiculos)
 
 # Rota para cadastro de veículos
 @app.route('/cadastro', methods=['GET', 'POST'])
 def cadastro():
     if request.method == 'POST':
-        # Recebe os dados do formulário e cria um novo veículo
         nome = request.form['nome']
         marca = request.form['marca']
         ano = request.form['ano']
@@ -34,21 +41,76 @@ def cadastro():
         cor = request.form['cor']
         observacao = request.form['observacao']
         veiculo = Veiculo(nome=nome, marca=marca, ano=ano, placa=placa, cor=cor, observacao=observacao)
-
-        # Adiciona o novo veículo ao banco de dados
         db.session.add(veiculo)
         db.session.commit()
-
-        # Redireciona para a página inicial após o cadastro
-        return redirect('/')
-
-    # Se for um GET, renderiza o formulário de cadastro
+        return redirect('/listar')
     return render_template('cadastro.html')
 
-if __name__ == '__main__':
-    # Criação do banco de dados (caso não exista)
-    with app.app_context():
-        db.create_all()
+# Rota para editar um veículo
+@app.route('/editar/<int:id>', methods=['GET', 'POST'])
+def editar(id):
+    veiculo = Veiculo.query.get_or_404(id)
+    if request.method == 'POST':
+        veiculo.nome = request.form['nome']
+        veiculo.marca = request.form['marca']
+        veiculo.ano = request.form['ano']
+        veiculo.placa = request.form['placa']
+        veiculo.cor = request.form['cor']
+        veiculo.observacao = request.form['observacao']
+        db.session.commit()
+        return redirect('/listar')
+    return render_template('cadastro.html', veiculo=veiculo)
 
-    # Rodando a aplicação na porta 5001 com SSL (caso tenha configurado)
-    app.run(debug=True, host='0.0.0.0', port=5001, ssl_context=('flask.crt', 'flask.key'))  
+# Rota para excluir um veículo
+@app.route('/excluir/<int:id>')
+def excluir(id):
+    veiculo = Veiculo.query.get_or_404(id)
+    db.session.delete(veiculo)
+    db.session.commit()
+    return redirect('/listar')
+
+# Rota para importar dados
+@app.route('/importar', methods=['GET', 'POST'])
+def importar():
+    if request.method == 'POST':
+        file = request.files['arquivo']
+        if file.filename.endswith('.csv'):
+            data = pd.read_csv(file)
+            for _, row in data.iterrows():
+                veiculo = Veiculo(
+                    nome=row['Nome'],
+                    marca=row['Marca'],
+                    ano=row['Ano'],
+                    placa=row['Placa'],
+                    cor=row['Cor'],
+                    observacao=row.get('Observação', '')
+                )
+                db.session.add(veiculo)
+            db.session.commit()
+            return redirect('/listar')
+    return render_template('importar.html')
+
+# Rota para exportar dados
+@app.route('/exportar')
+def exportar():
+    veiculos = Veiculo.query.all()
+    data = [{'Nome': v.nome, 'Marca': v.marca, 'Ano': v.ano, 'Placa': v.placa, 'Cor': v.cor, 'Observação': v.observacao} for v in veiculos]
+    df = pd.DataFrame(data)
+    
+    # Definindo o caminho para salvar o arquivo Excel
+    file_path = 'static/veiculos.xlsx'
+    
+    # Criar a pasta 'static' se não existir
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    
+    # Salvando o arquivo Excel na pasta static
+    df.to_excel(file_path, index=False)
+    
+    # Redirecionando para o arquivo Excel na pasta 'static'
+    return redirect(f'/{file_path}')
+
+# Inicialização do banco de dados
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()  # Criação das tabelas do banco de dados
+    app.run(debug=True, host='0.0.0.0', port=5001)

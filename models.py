@@ -12,3 +12,4 @@ class Veiculo(db.Model):
     placa = db.Column(db.String(20), nullable=False)
     cor = db.Column(db.String(50), nullable=False)
     observacao = db.Column(db.Text, nullable=True)
+
